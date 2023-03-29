@@ -42,6 +42,42 @@ void setMethodPoint() {
 // 定义监听消息线程
 void threadEntry();
 
+//发送断开消息
+Napi::Value sendDisConMsg(const Napi::CallbackInfo& info){
+    Napi::Env env = info.Env();
+
+    int disconnectmsgLength;
+    char * disconnectMsgBuf = make_disconnect_message(&disconnectmsgLength, 1);
+
+     int ret=0;
+     //发送PingreqMessage的消息
+     if (disconnectMsgBuf) {
+         ret = client->SendMessage(disconnectMsgBuf, disconnectmsgLength);
+         free(disconnectMsgBuf);
+         disconnectMsgBuf = NULL;
+     }
+     return Napi::Number::New(env, ret);
+}
+//发送ping消息
+Napi::Value sendPingMsg(const Napi::CallbackInfo& info){
+    Napi::Env env = info.Env();
+
+    int pingreqMessageLength;
+    char * pingreqMsgBuf = make_pingreq_message(&pingreqMessageLength);
+
+    int ret=0;
+
+    //发送PingreqMessage的消息
+    if (pingreqMsgBuf) {
+        ret = client->SendMessage(pingreqMsgBuf, pingreqMessageLength);
+        free(pingreqMsgBuf);
+        pingreqMsgBuf = NULL;
+    }
+     return Napi::Number::New(env, ret);
+
+}
+
+
 // 发送消息
 Napi::Value sendByteMsg(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
@@ -171,13 +207,6 @@ Napi::Value Connect(const Napi::CallbackInfo& info) {
 
 // 初始化EasyTcpClient, 和服务器建立连接
 Napi::Number InitClient(const Napi::CallbackInfo& info) {
-  //  //测试protobuf
-  //    Notify msg;
-  //    msg.set_time(1);
-  //    msg.set_type(2);
-  //  string* output;
-  //  msg->SerializeToString(output);
-  //  printf("protobuf%d\n",output);
 
   Napi::Env env = info.Env();
   client = new EasyTcpClient();
@@ -236,6 +265,10 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports["sendByteMsg"] = Napi::Function::New(env, sendByteMsg);
   // 发送查询消息
   exports["sendQueryBytesMsg"] = Napi::Function::New(env, sendQueryBytesMsg);
+  //发送ping消息
+  exports["sendPingMsg"] = Napi::Function::New(env, sendPingMsg);
+  //发送断开消息
+  exports["sendDisConMsg"] = Napi::Function::New(env, sendDisConMsg);
 
   return exports;
 }

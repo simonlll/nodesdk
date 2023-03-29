@@ -1,7 +1,9 @@
-const { createTSFN, InitClient,Connect,sendByteMsg,sendQueryBytesMsg} = require('bindings')('addon');
+const { createTSFN, InitClient,Connect,sendByteMsg,sendQueryBytesMsg,sendPingMsg,sendDisConMsg} = require('bindings')('addon');
 var protobuf = require("protobufjs");
 const utf8 = require('utf8');
-
+var SqliteDB = require('./sqlite.js').SqliteDB;
+var file = "sundot.db";
+var sqliteDB = new SqliteDB(file);
 //-----------------------------消息回调函数-----------------------------
 const callback = (msgObj) => {
 
@@ -109,22 +111,24 @@ const callback = (msgObj) => {
 };
 
 //-----------------------------生成消息内容-----------------------------
-function getMsgContent() {
+function getMsgContent(channeltype, content, extra,targetId, msgType,senderId) {
 // 构造消息
     var txtContent = {
-        "content": "你要好",
-        "extra": "extra"
+        "content": content,
+        "extra": extra
     };
     var bytecontent = new Buffer(JSON.stringify(txtContent), 'utf8');
 
+    //获取当前时间戳
+    ts = new Date().valueOf();
     var content = {
-        msgTimestamp: "1679892372112",
-        fromUserId: "linbin2",
-        objectName: "TxtMsg",
-        channelType: "PERSON",
-        msgUID: "C745-HLLE-02A0-44JF",
-        source: "Android",
-        toUserId: "zoujia1",
+        msgTimestamp: ts,
+        fromUserId: senderId,
+        objectName: msgType,
+        channelType: channeltype,
+        msgUID: "MsgUID",
+        source: "PC",
+        toUserId: targetId,
         content: bytecontent
     }
     return content;
@@ -192,9 +196,13 @@ function qry7dayMsg() {
 
 
 //-----------------------------发送消息  -------------------------------------
-function sendMsg() {
-    var content = getMsgContent();
+function sendMsg(channeltype, content, extra,targetId, msgType,senderId) {
+    var content = getMsgContent(channeltype, content, extra,targetId, msgType,senderId);
 
+    //存入数据库， 获取messageID  注： Message Direction: SEND(1),RECEIVE(2);
+    var values = [[content["fromUserId"],content["targetId"],content["channelType"],content["objectName"],JSON.stringify(content),"sending",content["msgTimestamp"],0,content["msgTimestamp"],"send","msguid"]];
+    var insertMsgSql = "INSERT INTO message(\"senderID\", \"targetID\", \"conversationType\", \"msgType\", \"data\", \"sendStatus\", \"sendingTime\", \"receiveTime\", \"createTime\", \"messageDirection\", \"msguid\") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+    sqliteDB.insertData(insertMsgSql,values);
 
     //用protobuf编码
     protobuf.load("Message.proto", function (err, root) {
@@ -207,6 +215,8 @@ function sendMsg() {
 
         // Decode an Uint8Array (browser) or Buffer (node) to a message
         contentbuffer = AwesomeMessage.encode(content).finish();
+
+
         //发送消息 参数1：conversation_type 1 private 3 group 参数4： msgid
         console.log(sendByteMsg(1, "zoujia1", contentbuffer, contentbuffer.length, 1));
     });
@@ -221,14 +231,21 @@ function main(){
     console.log(Connect("AJofTYRyfPCyghUPxmshEjK/lhkVnr7w6ye/Pu9YaXvKepMyIxQxs5hXEb3vSOHpGvEE8dSemsNOI/azIuA9LOdqfsI="));
 
     //发送消息
-    // sendMsg();
+    sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2");
 
+    //发送ping消息
+    // console.log("sendPingMsg返回结果：", sendPingMsg());
+
+    //发送断开连接消息
+    // console.log("sendDisConMsg：", sendDisConMsg());
 
     //发送查询字符串
     // setTimeout(()=>sendQryHisMsg(),2000);
     // setTimeout(()=>qry7dayMsg(),2000);
 
 };
+
+
 
 
 
