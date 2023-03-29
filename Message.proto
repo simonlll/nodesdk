@@ -1,0 +1,58 @@
+  option java_package = "com.sundot.protobufmessage";
+      option java_outer_classname = "Messages";
+      message Message {
+          required int64 msgTimestamp = 1; //服务端收到客户端发送消息时的服务器时间（1970年到现在的毫秒数）
+          required string fromUserId = 2; //发送用户 Id
+          required string objectName = 3; //消息类型，文本消息 TxtMsg 、 图片消息 ImgMsg 、语音消息 VcMsg
+          required string channelType = 4; //会话类型，二人会话是 PERSON 、群组会话是 GROUP
+          required string msgUID = 5; //可通过 msgUID 确定消息唯一。
+          required string source = 6; //标识消息的发送源头，包括：iOS、Android、Websocket、Server（通过 Server API 发送）
+          required string toUserId = 7;//目标 Id，即为客户端 targetId，根据会话类型 channelType 的不同，可能为二人会话 Id、群聊 Id等。
+          required bytes content = 8; //发送消息内容
+          optional int64 status = 9; //状态
+      }
+
+      //查询7天内消息记录
+      message CSQryPullMessage {
+                required int64 sendBoxSyncTime = 1; //上次同步sendbox的服务器时间（1970年到现在的毫秒数）
+                required bool isPullSend = 2; //是否拉取发件箱
+                required string fromUserId = 3; //发送用户 Id
+                required int64 syncTime = 4; //上次同步的服务器时间（1970年到现在的毫秒数）
+                required string clientOs = 5; //设备系统 IOS Android
+      }
+
+       //返回7天内记录结果
+      message CSQryPullMessageACK {
+                       repeated Message list = 1; //返回的消息列表
+                       required bool finished = 2; //是否已经拉取完毕
+                       required int64 syncTime = 3; //同步的服务器时间（1970年到现在的毫秒数）
+                       optional string clientOs = 4; //设备系统 IOS Android
+            }
+
+       //查询结果通知
+       message Notify {
+        required int64 time = 1; //下一次同步的时间（1970年到现在的毫秒数）
+        optional int64 type = 2; //通知类型
+       }
+
+       //查询某个会话的消息历史记录，可以最多180天
+       message CSQryPullHisMessage {
+           required int64 time = 1; //拉取的时间（1970年到现在的毫秒数）
+           required int32 count = 2; //通知数量
+           required string targetId = 3; //聊天对象id
+           required string channelType = 4; //PERSON GROUP
+
+       }
+
+
+       //查询某个会话的消息历史记录，可以最多180天
+       message CSQryPullHisMessageACK {
+         repeated Message list = 1; //返回的消息列表
+         required bool hasMsg = 2; //是否有数据
+         required int64 syncTime = 3; //同步的服务器时间（1970年到现在的毫秒数）
+       }
+
+
+
+
+
