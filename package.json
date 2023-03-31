@@ -9,6 +9,7 @@
     "bindings": "*",
     "node-addon-api": "*",
     "protobufjs": "~7.2.2",
+    "protobufjs-cli": "~1.1.1",
     "sqlite3": "^5.1.6",
     "utf8": "^3.0.0"
   },
