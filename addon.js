@@ -5,9 +5,17 @@ var fs = require('fs');
 var sqlite3 = require('sqlite3').verbose();
 var file = "sundot.db";
 var msgroot = require("./message.js");
+var async = require('async');
 
-
+var currentuser;
+var connectioncallback;
 db = new sqlite3.Database(file);
+// db.run("CREATE TABLE conversation(id INTEGER primary key autoincrement,senderID varchar(50),targetID varchar(50),conversationType varchar(10),msgType varchar(20),data varchar(500), sentTime INTEGER, receivedTime INTEGER,portraitUrl varchar(50), latestMessageId INTEGER,unreadMessageCount INTEGER,conversationTitle varchar(50));",function (err) {
+    
+// });
+// db.run("CREATE TABLE message(id INTEGER primary key autoincrement,senderID varchar(50),targetID varchar(50),conversationType varchar(10),msgType varchar(20),data varchar(500),sendStatus varchar(10),  sendingTime INTEGER, receiveTime INTEGER,  createTime INTEGER, messageDirection INTEGER, msguid varchar(30));",function (err) {
+    
+// });
 if(!fs.existsSync(file)){
     // console.log("Creating db file!");
     fs.openSync(file, 'w');
@@ -16,6 +24,12 @@ if(!fs.existsSync(file)){
 const callback = (msgObj) => {
 
     switch(msgObj.msyType){
+        case 2: //返回数据类型为connack,连接确认消息,读返回的消息
+            console.log("返回数据类型为conActMessage");
+            connectioncallback(msgObj.userId);
+            break;
+
+
         case 3: //返回数据类型为ServerPublishMessage, 服务器下发的聊天信息
             console.log("返回数据类型为ServerPublishMessage");
 
@@ -25,29 +39,51 @@ const callback = (msgObj) => {
             break;
 
         case 4://消息到达服务器确认，返回的信息有在客户端生成的messagid, 和服务端生成的msguid，更新本地发送数据库，放入msguid,防止数据重复存储
-            // console.log("返回数据类型为 PublishAckMessage");
-            // console.log("PublishAckMessage is:", msgObj);
+            console.log("返回数据类型为 PublishAckMessage");
+            console.log("PublishAckMessage is:", msgObj);
 
             break;
 
         case 6://返回数据类型为QueryAckMessage, 服务器下发的用户离线信息
             console.log("返回数据类型为QueryAckMessage");
-            // console.log("QueryAckMessage is:", msgObj);
             if(msgObj.status == 0){ //PullMsg 拉取使用者7天内所有的聊天记录，protobuf对应的类型：CSQryPullMessageACK
                 var messages = msgroot.CSQryPullMessageACK.decode(msgObj.data);
                 for(i=0;i<messages.list.length;i++){
                     var message = messages.list[i];
-                    console.log("message content byte===>",message.content);
                     console.log("msg content",message.content.toString("utf8"));                    }
             }
 
             if(msgObj.status == 1){ //PullHisMsg 拉取和某一个人的180天历史记录，protobuf对应的类型：CSQryPullHisMessageACK
                 var messages = msgroot.CSQryPullHisMessageACK.decode(msgObj.data);
-                for(i=0;i<messages.list.length;i++){
-                    var message = messages.list[i];
-                    console.log("message content byte===>",message.content);
-                    console.log(message.content.toString("utf8"));                    }
+                var count = messages.list.length;
+                var i = 0;
+                async.whilst(
+                    function (cb) {
+                        cb(null,i < count);
+                    },
+                    function(cb){
+                            var message = messages.list[i];
+                            //存入数据库
+                            var msgDirection = 1 // 消息方向：//SEND 1 RECEIVE 2
+                            if(message.toUserId == currentuser){
+                                msgDirection = 2;
+                            }
+                            var msgcontent = JSON.parse(message.content.toString("utf8"));
 
+                            var content = getMsgContent(parseInt(message.msgTimestamp),message.msgUID,message.channelType,msgcontent["content"],msgcontent["extra"],message.toUserId, message.objectName,message.fromUserId,msgDirection);
+                            saveMessage(content, "pullhismsg",function (err, result) {
+                                cb();
+                                if(null != err){
+                                    console.log("PullHisMsg saveMessage() err:",err );
+                                }
+                            });
+                            i++;
+
+
+                    },
+                    function(err){
+                        console.log(err);
+                    });
             }
 
 
@@ -57,6 +93,8 @@ const callback = (msgObj) => {
 
 /**
  * 生成聊天消息内容
+ * @timestamp 时间戳
+ * @msgUID 在服务器端的msgUID
  * @param channeltype 聊天类型 PERSON GROUP
  * @param content 消息内容
  * @param extra   附加消息内容
@@ -66,21 +104,20 @@ const callback = (msgObj) => {
  * @param msgDirection 消息方向：//SEND 1 RECEIVE 2
  * @returns {{msgTimestamp: *, fromUserId: *, objectName: *, channelType: *, msgUID: string, source: string, toUserId: *, content, messageid: number, msgDirection: *}}
  */
-function getMsgContent(channeltype, content, extra,targetId, msgType,senderId,msgDirection) {
+function getMsgContent(timestamp, msgUID, channeltype, content, extra,targetId, msgType,senderId,msgDirection) {
 // 构造消息
     var txtContent = {
         "content": content,
         "extra": extra
     };
 
-    //获取当前时间戳
-    ts = new Date().valueOf();
+
     var content = {
-        msgTimestamp: ts,
+        msgTimestamp: timestamp,
         fromUserId: senderId,
         objectName: msgType,
         channelType: channeltype,
-        msgUID: "MsgUID",
+        msgUID: msgUID,
         source: "PC",
         toUserId: targetId,
         content: txtContent,
@@ -99,6 +136,7 @@ function getMsgContent(channeltype, content, extra,targetId, msgType,senderId,ms
  * @param conversationType 聊天类型：PERSON， GROUP
  */
 function sendQryHisMsg(timestamp, count, targetId, conversationType) {
+
     let contentbuffer;
 
     var CSQryPullHisMessage = {
@@ -108,22 +146,12 @@ function sendQryHisMsg(timestamp, count, targetId, conversationType) {
         "channelType": conversationType //PERSON GROUP
     }
 
-    //用protobuf编码
-    protobuf.load("Message.proto", function (err, root) {
-        if (err)
-            throw err;
 
-        // Obtain a message type
-        var AwesomeMessage = root.lookupType("CSQryPullHisMessage");
+    contentbuffer = msgroot.CSQryPullHisMessage.encode(CSQryPullHisMessage).finish();
+    console.log("发送查询消息结果：", sendQueryBytesMsg("linbin2", contentbuffer, contentbuffer.length, "pullHisMsg"));
 
-        // Decode an Uint8Array (browser) or Buffer (node) to a message
-        contentbuffer = AwesomeMessage.encode(CSQryPullHisMessage).finish();
 
-        //发送消息
-        //     console.log(sendQueryBytesMsg("linbin2", contentbuffer, contentbuffer.length, "pullMsg"));
 
-        console.log("发送查询消息结果：", sendQueryBytesMsg("linbin2", contentbuffer, contentbuffer.length, "pullHisMsg"));
-    });
 }
 
 //-----------------------------发送查询消息，拉取7天内所有聊天记录 -------------------------------------
@@ -160,35 +188,129 @@ function qry7dayMsg() {
  * 在本地数据库存储消息
  * @param content 消息内容
  * @param cb 回调函数
+ * @param caller 调用者 1 sendmsg(发送消息)，2 recceimsg(收到下发消息)， 3.pullhismsg(拉取的历史消息）
  */
-function saveMessage(content,cb){
+function saveMessage(content,caller,cb){
 //存入数据库， 获取messageID  注： Message Direction: SEND(1),RECEIVE(2);
-    var values = [content["fromUserId"], content["toUserId"], content["channelType"], content["objectName"], JSON.stringify(content), "sending", content["msgTimestamp"], 0, content["msgTimestamp"], "send", "msguid"];
-    var insertMsgSql = "INSERT INTO message(\"senderID\", \"targetID\", \"conversationType\", \"msgType\", \"data\", \"sendStatus\",\"sendingTime\", \"receiveTime\", \"createTime\", \"messageDirection\", \"msguid\") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
-    db.all(insertMsgSql, values, function (err, result) {
-        if(null!=err) {
-            cb(err,null);
-        }
-        var querySql = "select max(id) as newid from message;"
-        db.all(querySql, function (err, rows) {
-                if (null != err) {
-                    console.log("insert err", err);
-                    cb(err,null);
-                }
-                content["messageid"] = rows[0]["newid"];
-                var updateSql = "update message set data = ? where id= ?";
-                values = [JSON.stringify(content), content["messageid"]];
+    if(content["msgDirection"] == 1&&caller =="sendmsg"){ //发送消息 1 && 来自于发送消息的调用
+        var insertMsgSql = "INSERT INTO message(\"senderID\", \"targetID\", \"conversationType\", \"msgType\", \"data\", \"sendStatus\",\"sendingTime\", \"receiveTime\", \"createTime\", \"messageDirection\", \"msguid\") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+        var values = [content["fromUserId"], content["toUserId"], content["channelType"], content["objectName"], JSON.stringify(content), "sending", content["msgTimestamp"], 0, content["msgTimestamp"], content["msgDirection"], "msguid"];
 
-                db.all(updateSql, values, function (err, result) {
+        db.all(insertMsgSql, values, function (err, result) {
+            if(null!=err) {
+                cb(err,null);
+            }
+            var querySql = "select max(id) as newid from message;"
+            db.all(querySql, function (err, rows) {
                     if (null != err) {
-                        console.log("update error:", err);
+                        console.log("insert err", err);
                         cb(err,null);
                     }
-                    insert_or_update_conversation(content,cb);
+                    content["messageid"] = rows[0]["newid"];
+                    var updateSql = "update message set data = ? where id= ?";
+                    values = [JSON.stringify(content), content["messageid"]];
+
+                    db.all(updateSql, values, function (err, result) {
+                        if (null != err) {
+                            console.log("update error:", err);
+                            cb(err,null);
+                        }
+                        insert_or_update_conversation(content,cb);
+                    })
+                }
+            )
+        });
+    } else if(content["msgDirection"] == 1&&caller =="recceimsg") { //发送消息 1 && 来自于收取的消息
+
+
+    } else if(content["msgDirection"] == 1&&caller =="pullhismsg") { //发送消息 1 && 来自于拉取的历史消息
+        //先看消息是否已经在数据库里面
+        var checkSql = "select * from message where msguid=? and messageDirection=? and sendStatus=?";
+        var checkSqlValue = [content["msgUID"],2,"sent"];
+        db.all(checkSql,checkSqlValue, function (err, rows) {
+            if (null != err) {
+                console.log("select err", err);
+                cb(err,null);
+            }
+            if(rows.length == 0){//说明没有记录
+                //获取当前时间戳
+                ts = new Date().valueOf();
+                var insertMsgSql = "INSERT INTO message(\"senderID\", \"targetID\", \"conversationType\", \"msgType\", \"data\", \"sendStatus\",\"sendingTime\", \"receiveTime\", \"createTime\", \"messageDirection\", \"msguid\") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+                var values = [content["fromUserId"], content["toUserId"], content["channelType"], content["objectName"], JSON.stringify(content), "sent", content["msgTimestamp"], 0, ts, content["msgDirection"], content["msgUID"]];
+                db.all(insertMsgSql,values, function (err,result) {
+                    if(null != err){
+                        console.log("insert err", err);
+                        cb(err,null);
+                    }
+                    var querySql = "select max(id) as newid from message;"
+                    db.all(querySql, function (err, rows) {
+                        if (null != err) {
+                            console.log("select err", err);
+                            cb(err, null);
+                        }
+                        content["messageid"] = rows[0]["newid"];
+                        var updateSql = "update message set data = ? where id= ?";
+                        values = [JSON.stringify(content), content["messageid"]];
+
+                        db.all(updateSql, values, function (err, result) {
+                            if (null != err) {
+                                console.log("update error:", err);
+                                cb(err,null);
+                            }
+                            insert_or_update_conversation(content,cb);
+                        });
+
+                    });
+                });
+            }
+        });
+
+    } else if(content["msgDirection"] == 2){ //接受消息 2
+        //先看消息是否已经在数据库里面
+        var checkSql = "select * from message where msguid=? and messageDirection=?";
+        var checkSqlValue = [content["msgUID"],2];
+        db.all(checkSql,checkSqlValue, function (err, rows) {
+            if (null != err) {
+                console.log("select err", err);
+                cb(err,null);
+            }
+            if(rows.length == 0){//说明没有记录
+                //获取当前时间戳
+                ts = new Date().valueOf();
+                var insertMsgSql = "INSERT INTO message(\"senderID\", \"targetID\", \"conversationType\", \"msgType\", \"data\", \"sendStatus\",\"sendingTime\", \"receiveTime\", \"createTime\", \"messageDirection\", \"msguid\") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
+                var values = [content["fromUserId"], content["toUserId"], content["channelType"], content["objectName"], JSON.stringify(content), "received", content["msgTimestamp"], ts, ts, content["msgDirection"], content["msgUID"]];
+                db.all(insertMsgSql,values, function (err,result) {
+                    if (null != err) {
+                        console.log("select err", err);
+                        cb(err,null);
+                    }
+                    var querySql = "select max(id) as newid from message;"
+                    db.all(querySql, function (err, rows) {
+                        if (null != err) {
+                            console.log("select err", err);
+                            cb(err, null);
+                        }
+                        content["messageid"] = rows[0]["newid"];
+                        var updateSql = "update message set data = ? where id= ?";
+                        values = [JSON.stringify(content), content["messageid"]];
+
+                        db.all(updateSql, values, function (err, result) {
+                            if (null != err) {
+                                console.log("update error:", err);
+                                cb(err,null);
+                            }
+                            insert_or_update_conversation(content,cb);
+                        });
+
+                    });
                 })
             }
-        )
-    });
+        });
+    }else {
+
+    }
+
+
 }
 
 /**
@@ -236,14 +358,14 @@ function insert_or_update_conversation(content,cb){
         selectsql = "select * from conversation where (targetID=? and senderID=?) and conversationType='GROUP'";
         values = [targetID,targetID];
     }
-    // console.log("slectsql=",selectsql);
-    // console.log("values=",values);
-    db.all(selectsql, values, function (err, result) {
+    console.log("slectsql=",selectsql);
+    console.log("values=",values);
+    db.all(selectsql, values, function (err, rows) {
         if(null!=err) {
             cb(err,null);
         }
-        // console.log("result=",result);
-        if(result.length == 0) {//如果查询结果为空
+        console.log("rows=",rows);
+        if(rows.length == 0) {//如果查询结果为空
             var insertOrUpdateSql = "INSERT INTO conversation( \"senderID\", \"targetID\", \"conversationType\", \"msgType\", \"data\", \"sentTime\", \"receivedTime\", \"portraitUrl\", \"latestMessageId\", \"unreadMessageCount\", \"conversationTitle\") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
             var insertOrUpdatevalues = [senderID, targetID, content["channelType"], content["objectName"], JSON.stringify(content["content"]), content["msgTimestamp"], content["msgTimestamp"], "portraitUrl", content["messageid"], 0, "conversationTitle"];
             if(channelType == "GROUP") {
@@ -258,6 +380,8 @@ function insert_or_update_conversation(content,cb){
                 insertOrUpdatevalues = [content["msgTimestamp"],content["msgTimestamp"],content["objectName"],JSON.stringify(content["content"]),content["messageid"],targetID,targetID,"GROUP"];
             }
         }
+        console.log("insertOrUpdateSql=",insertOrUpdateSql);
+
 
         db.all(insertOrUpdateSql,insertOrUpdatevalues,function(err,result){
             if(err!=null){
@@ -279,29 +403,25 @@ function insert_or_update_conversation(content,cb){
  * @param msgDirection 消息方向：//SEND 1 RECEIVE 2
  */
 function sendMsg(channeltype, content, extra,targetId, msgType,senderId,msgDirection) {
-    content = getMsgContent(channeltype, content, extra,targetId, msgType,senderId,msgDirection);
-    saveMessage(content,function(err,result){
-        //用protobuf编码
-        protobuf.load("Message.proto", function (err, root) {
-            if(null != null){
+    //获取当前时间戳
+    ts = new Date().valueOf();
+    content = getMsgContent(ts,"msgUID",channeltype, content, extra,targetId, msgType,senderId,msgDirection);
+    saveMessage(content,"sendmsg",function(err,result){
+        if(null != err){
+            console.log(err);
+        }
+        insert_or_update_conversation(content,function(err,result){
+            if(null != err){
                 console.log(err);
-                return;
             }
             var contentbuffer;
-            if (err)
-                throw err;
             var bytecontent = new Buffer(JSON.stringify(content["content"]), 'utf8');
             content["content"] = bytecontent;
-
-            // Obtain a message type
-            var AwesomeMessage = root.lookupType("Message");
-
-            // Decode an Uint8Array (browser) or Buffer (node) to a message
-            contentbuffer = AwesomeMessage.encode(content).finish();
-
+            contentbuffer = msgroot.Message.encode(content).finish();
             //发送消息 参数1：conversation_type 1 private 3 group 参数4： msgid
-            // console.log(sendByteMsg(1, "zoujia1", contentbuffer, contentbuffer.length, 1));
+            console.log(sendByteMsg(1, "zoujia1", contentbuffer, contentbuffer.length, 1));
         });
+
     });
 
 
@@ -323,8 +443,14 @@ function getHistoryMessage(timestamp, count, targetId, conversationType,cb){
 }
 
 
+/**
+ * 设置连接成功后的回调函数。只有连接成功，才能进行下面的操作
+ * @param cb
+ */
+function setConnectCallback(cb){
+    connectioncallback = cb;
 
-
+}
 
 
 
@@ -334,6 +460,20 @@ function main(){
     InitClient();
     //启动接受线程，设置消息回调函数
     createTSFN(callback);
+    //设置连接回调
+    setConnectCallback(function (result) {
+        currentuser = result;
+        //查询和某人的历史消息
+        getHistoryMessage(0, 20, "zoujia1", "PERSON",function (err, result) {
+            // console.log("getHistoryMessage result:",result);
+        });
+        //发送断开连接消息
+        // console.log("sendDisConMsg：", sendDisConMsg());
+
+
+    })
+
+
     //发送连接消息（参数是用户的token)
     Connect("AJofTYRyfPCyghUPxmshEjK/lhkVnr7w6ye/Pu9YaXvKepMyIxQxs5hXEb3vSOHpGvEE8dSemsNOI/azIuA9LOdqfsI=");
 
@@ -349,10 +489,7 @@ function main(){
     //发送查询字符串
     // sendQryHisMsg();
     // qry7dayMsg();
-    //查询和某人的历史消息
-    getHistoryMessage(0, 20, "zoujia1", "PERSON",function (err, result) {
-        // console.log("getHistoryMessage result:",result);
-    });
+
 
 };
 

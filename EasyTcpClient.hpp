@@ -276,7 +276,7 @@ public:
                 //计算buf的指针末尾的值
                 int skipedIndex = 2 + decodeLengthResult;
                 char * endDataPointer = _szMsgBuf + skipedIndex + *payloadLength;
-                ConnAckMessage conActMessage;
+                ConnAckMessage conAckMessage;
                 _szMsgBuf += skipedIndex;
 
                 //读返回状态
@@ -285,15 +285,29 @@ public:
                 char status = readChar(&_szMsgBuf);
                 printf("status=%d\n", status);
                 //TODO 释放userId 它是由malloc分配的内存
-                conActMessage.userId = readUTF(&_szMsgBuf, endDataPointer);
-                printf("userId=%s\n", conActMessage.userId);
+                conAckMessage.userId = readUTF(&_szMsgBuf, endDataPointer);
+                printf("userId=%s\n", conAckMessage.userId);
                 //TODO 释放session 它是由malloc分配的内存
-                conActMessage.session = readUTF(&_szMsgBuf, endDataPointer);
-                printf("session=%s\n", conActMessage.session);
-                conActMessage.timestamp = readLongLong(&_szMsgBuf);
-                printf("timestamp=%llu\n", conActMessage.timestamp);
+                conAckMessage.session = readUTF(&_szMsgBuf, endDataPointer);
+                printf("session=%s\n", conAckMessage.session);
+                conAckMessage.timestamp = readLongLong(&_szMsgBuf);
+                printf("timestamp=%llu\n", conAckMessage.timestamp);
                 //回调addon.cc
-                _connAckMsgResultCallback(conActMessage);
+                //_connAckMsgResultCallback(conActMessage);
+                //直接调用js传入的callback:
+                //variable ‘XXX cannot be implicitly captured in a lambda with no capture-default specified
+                //  https://blog.csdn.net/zsiming/article/details/127037087
+                auto callback = [=](Napi::Env env, Napi::Function jsCallback, ConnAckMessage* msg) {
+                    // Transform native data into JS data, passing it to the provided
+                    // `jsCallback` -- the TSFN's JavaScript function.
+                    Napi::Object obj = Napi::Object::New(env);
+                    obj.Set(Napi::String::New(env, "msyType"), Napi::Number::New(env,2));
+                    obj.Set(Napi::String::New(env, "userId"), Napi::String::New(env,conAckMessage.userId));
+                    obj.Set(Napi::String::New(env, "session"), Napi::String::New(env,conAckMessage.session));
+                    obj.Set(Napi::String::New(env, "date"), Napi::Number::New(env,conAckMessage.timestamp));
+                    jsCallback.Call({obj});
+                };
+                napi_status napi_status = _listener.BlockingCall(&conAckMessage, callback);
                 break;
             }
 

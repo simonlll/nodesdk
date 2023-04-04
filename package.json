@@ -6,6 +6,7 @@
   "private": true,
   "gypfile": true,
   "dependencies": {
+    "async": "^3.2.4",
     "bindings": "*",
     "node-addon-api": "*",
     "protobufjs": "~7.2.2",
