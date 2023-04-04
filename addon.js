@@ -333,8 +333,8 @@ function qryLocalHistoryMessage(timestamp, count, targetId, conversationType, cu
         qryStr = "select * from message where (senderID=? or targetID=?) and createTime>? order by createTime desc limit ?";
         values = [targetId, targetId, timestamp, count];
     }
-    // console.log("qryStr:",qryStr);
-    // console.log("values:",values);
+    console.log("qryStr:",qryStr);
+    console.log("values:",values);
 
     db.all(qryStr, values,function(err, rows){
         // console.log("get local history message result:", rows);
@@ -439,7 +439,7 @@ function sendMsg(channeltype, content, extra,targetId, msgType,senderId,msgDirec
  */
 function getHistoryMessage(timestamp, count, targetId, conversationType,cb){
     sendQryHisMsg(timestamp, count, targetId, conversationType);
-    // qryLocalHistoryMessage(timestamp, count, targetId, conversationType,"linbin2",cb);
+    qryLocalHistoryMessage(timestamp, count, targetId, conversationType,"linbin2",cb);
 }
 
 
@@ -464,9 +464,11 @@ function main(){
     setConnectCallback(function (result) {
         currentuser = result;
         //查询和某人的历史消息
-        getHistoryMessage(0, 20, "zoujia1", "PERSON",function (err, result) {
-            // console.log("getHistoryMessage result:",result);
-        });
+        //获取当前时间戳
+        // ts = new Date().valueOf();
+        // getHistoryMessage(ts, 20, "zoujia1", "PERSON",function (err, result) {
+        //     console.log("getHistoryMessage result:",result);
+        // });
         //发送断开连接消息
         // console.log("sendDisConMsg：", sendDisConMsg());
 
@@ -475,7 +477,7 @@ function main(){
 
 
     //发送连接消息（参数是用户的token)
-    Connect("AJofTYRyfPCyghUPxmshEjK/lhkVnr7w6ye/Pu9YaXvKepMyIxQxs5hXEb3vSOHpGvEE8dSemsNOI/azIuA9LOdqfsI=");
+    console.log("发送连接消息的结果",Connect("AJofTYRyfPCyghUPxmshEjK/lhkVnr7w6ye/Pu9YaXvKepMyIxQxs5hXEb3vSOHpGvEE8dSemsNOI/azIuA9LOdqfsI="));
 
     //发送消息
     // sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2

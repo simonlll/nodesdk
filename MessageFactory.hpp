@@ -33,11 +33,11 @@ char* make_connect_message(int* length, const char* token, const char* clientIP,
 	packet.header.byte = 17;
 	packet.flags.bits.hasClientIp = true;
 	//packet.clientIp = "127.0.0.1";
+
 	packet.clientIp = clientIP;
 	packet.flags.bits.hasAppId = true;
 	packet.appId = "10100557";
 	packet.flags.bits.hasToken = true;
-	//packet.token = "AJofTWsU+StU0c5Tt7J++sYq8gVmdAU+A/DJlEU9cLaBC/wj8TRK3QonNdDvSOHpGvEE8dSemsNOI/azIuA9LOdqfsI=";
 	packet.token = token;
 	//packet.clientId = "clientid";
 	packet.clientId = clientId;
@@ -52,12 +52,20 @@ char* make_connect_message(int* length, const char* token, const char* clientIP,
 	packet.flags.all = 231;
 
 	len = packet.CONNECT_HEADER_SIZE;
+
 	len += (int)strlen(packet.clientId) + 2;
+
 	len += (int)strlen(packet.appIdentifier) + 2;
+
 	len += (int)strlen(packet.info) + 2;
+
 	len += (int)strlen(packet.appId) + 2;
+
 	len += (int)strlen(packet.token) + 2;
+
 	len += (int)strlen(packet.clientIp) + 2;
+
+
 	//计算记录负载长度需要的byte位数
 	int payloadlength = write_msg_length(NULL, len, NULL);
 	int totallength = 1 + 1 + payloadlength + len; //header`(1), checkcode(1), 负载长度记录，负载长度

@@ -178,27 +178,24 @@ Napi::Value Connect(const Napi::CallbackInfo& info) {
   }
 
   std::string s1 = info[0].As<Napi::String>().Utf8Value();
-  char* data;
-  int len = s1.length();
-  data = (char*)malloc((len + 1) * sizeof(char));
-  s1.copy(data, len, 0);
+
 
   char* clientIP = "clientip";
 
   char* userid = "userid";
 
   int buflen;
-  printf("token=%s\n", data);
 
   // 创建一个连接消息
-  char* buf = make_connect_message(&buflen, data, clientIP, userid);
+  char* buf = make_connect_message(&buflen, s1.data(), clientIP, userid);
 
   int ret = 10;
   // 发送连接消息
   if (buf) {
-    ret = client->SendMessage(buf, buflen);
-    printf("发送消息结果%d\n", ret);
+    printf("发送连接消息buflen%d\n", buflen);
 
+    ret = client->SendMessage(buf, buflen);
+    printf("发送连接消息结果%d\n", ret);
     free(buf);
     buf = NULL;
   }
