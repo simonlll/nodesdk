@@ -48,9 +48,33 @@ const callback = (msgObj) => {
             console.log("返回数据类型为QueryAckMessage");
             if(msgObj.status == 0){ //PullMsg 拉取使用者7天内所有的聊天记录，protobuf对应的类型：CSQryPullMessageACK
                 var messages = msgroot.CSQryPullMessageACK.decode(msgObj.data);
-                for(i=0;i<messages.list.length;i++){
-                    var message = messages.list[i];
-                    console.log("msg content",message.content.toString("utf8"));                    }
+                var count = messages.list.length;
+                var i = 0;
+                async.whilst(
+                    function (cb) {
+                        cb(null,i < count);
+                    },
+                    function(cb){
+                        var message = messages.list[i];
+                        //存入数据库
+                        var msgDirection = 1 // 消息方向：//SEND 1 RECEIVE 2
+                        if(message.toUserId == currentuser){
+                            msgDirection = 2;
+                        }
+                        var msgcontent = JSON.parse(message.content.toString("utf8"));
+
+                        var content = getMsgContent(parseInt(message.msgTimestamp),message.msgUID,message.channelType,msgcontent["content"],msgcontent["extra"],message.toUserId, message.objectName,message.fromUserId,msgDirection);
+                        saveMessage(content, "pullhismsg",function (err, result) {
+                            cb();
+                            if(null != err){
+                                console.log("PullHisMsg saveMessage() err:",err );
+                            }
+                        });
+                        i++;
+                    },
+                    function(err){
+                        console.log(err);
+                    });
             }
 
             if(msgObj.status == 1){ //PullHisMsg 拉取和某一个人的180天历史记录，protobuf对应的类型：CSQryPullHisMessageACK
@@ -148,39 +172,70 @@ function sendQryHisMsg(timestamp, count, targetId, conversationType) {
 
 
     contentbuffer = msgroot.CSQryPullHisMessage.encode(CSQryPullHisMessage).finish();
-    console.log("发送查询消息结果：", sendQueryBytesMsg("linbin2", contentbuffer, contentbuffer.length, "pullHisMsg"));
+    console.log("发送查询180天历史消息结果：", sendQueryBytesMsg("linbin2", contentbuffer, contentbuffer.length, "pullHisMsg"));
 
 
 
 }
 
-//-----------------------------发送查询消息，拉取7天内所有聊天记录 -------------------------------------
-function qry7dayMsg() {
-    let contentbuffer;
+/**
+ * 向远端服务器发送查询使用人7天以内所有的消息
+ * @param sendBoxSyncTime 发件箱上次同步时间戳
+ * @param isPullSend 是否拉取发送消息
+ * @param fromUserId 使用人id，现在不起作用
+ * @param syncTime 上次同步时间戳
+ */
+function sendQryMessages(sendBoxSyncTime, isPullSend,fromUserId, syncTime) {
+    var contentbuffer;
 
     //生成查询7天消息
     var CSQryPullMessage = {
-        "sendBoxSyncTime": 1,
-        "isPullSend": true,
-        "fromUserId": "linbin2", //这个目前不起作用
-        "syncTime": 0,
-        "clientOs": "IOS"
+        "sendBoxSyncTime": sendBoxSyncTime,
+        "isPullSend": isPullSend,
+        "fromUserId": fromUserId, //这个目前不起作用
+        "syncTime": syncTime,
+        "clientOs": "PC"
     }
 
+    contentbuffer = msgroot.CSQryPullMessage.encode(CSQryPullMessage).finish();
+    console.log("发送查询7天历史消息结果：", sendQueryBytesMsg("linbin2", contentbuffer, contentbuffer.length, "pullMsg"));
+}
 
-    //用protobuf编码
-    protobuf.load("Message.proto", function (err, root) {
-        if (err)
-            throw err;
 
-        // Obtain a message type
-        var AwesomeMessage = root.lookupType("CSQryPullMessage");
-
-        // Decode an Uint8Array (browser) or Buffer (node) to a message
-        contentbuffer = AwesomeMessage.encode(CSQryPullMessage).finish();
-        //发送消息
-        console.log(sendQueryBytesMsg("linbin2", contentbuffer, contentbuffer.length, "pullMsg"));
+/**
+ * 查询会话列表
+ * @param sendBoxSyncTime 发件箱同步时间戳
+ * @param syncTime 同步时间戳
+ * @param count 数量
+ */
+function getConversationList(sendBoxSyncTime, syncTime, count) {
+    //向远端服务器发送查询使用人7天以内所有的消息
+    sendQryMessages(sendBoxSyncTime, true,"fromuserid", syncTime);
+    //查询本地数据库conversation表
+    qryLocalConversationList(syncTime,count,function (err,result) {
+        console.log("getConversationList result:",result);
     });
+
+}
+
+/**
+ * 查询本地数据库conversation表，获取会话列表
+ * @param timestamp
+ * @param count
+ * @param cb
+ */
+function qryLocalConversationList(timestamp,count,cb ) {
+    var qryStr = "select * from conversation where (sentTime>? or receivedTime>?) order by sentTime asc limit ?";
+    var values = [timestamp,timestamp,count];
+
+    console.log("qryStr:",qryStr);
+    console.log("values:",values);
+
+    db.all(qryStr, values,function(err, rows){
+        console.log("get local history message result:", rows);
+        cb(null,rows);
+    });
+
 }
 
 
@@ -454,6 +509,7 @@ function setConnectCallback(cb){
 
 
 
+
 function main(){
 
     //初始化EasyTcpClient, 和服务器建立连接
@@ -469,9 +525,14 @@ function main(){
         // getHistoryMessage(ts, 20, "zoujia1", "PERSON",function (err, result) {
         //     console.log("getHistoryMessage result:",result);
         // });
+
+        //查询会话列表getConversationList(sendBoxSyncTime, syncTime, count)
+        getConversationList(1, 0, 20);
         //发送断开连接消息
         // console.log("sendDisConMsg：", sendDisConMsg());
 
+        //发送消息
+        // sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2
 
     })
 
@@ -479,8 +540,7 @@ function main(){
     //发送连接消息（参数是用户的token)
     console.log("发送连接消息的结果",Connect("AJofTYRyfPCyghUPxmshEjK/lhkVnr7w6ye/Pu9YaXvKepMyIxQxs5hXEb3vSOHpGvEE8dSemsNOI/azIuA9LOdqfsI="));
 
-    //发送消息
-    // sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2
+
 
     //发送ping消息
     // console.log("sendPingMsg返回结果：", sendPingMsg());

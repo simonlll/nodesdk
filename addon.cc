@@ -209,7 +209,7 @@ Napi::Number InitClient(const Napi::CallbackInfo& info) {
   client = new EasyTcpClient();
   // 测试指针函数
   setMethodPoint();
-  int a = client->Connect("10.0.0.138", 7000);
+  int a = client->Connect("10.0.0.52", 7001);
   return Napi::Number::New(env, a);
 }
 
