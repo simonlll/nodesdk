@@ -33,15 +33,27 @@ const callback = (msgObj) => {
         case 3: //返回数据类型为ServerPublishMessage, 服务器下发的聊天信息
             console.log("返回数据类型为ServerPublishMessage");
 
-            var msg = msgroot.Message.decode(msgObj.data);
-            console.log("msg is:",msg);
-            console.log("msg content  is:",msg.content.toString("utf8"));
+            var message = msgroot.Message.decode(msgObj.data);
+
+            var msgDirection = 2; // 消息方向：//SEND 1 RECEIVE 2
+            var msgcontent = JSON.parse(message.content.toString("utf8"));
+
+            var content = getMsgContent(parseInt(message.msgTimestamp),message.msgUID,message.channelType,msgcontent["content"],msgcontent["extra"],message.toUserId, message.objectName,message.fromUserId,msgDirection);
+            saveMessage(content, "recceivemsg",function (err, result) {
+                if(null != err){
+                    console.log("recceivemsg saveMessage() err:",err );
+                }
+            });
             break;
 
         case 4://消息到达服务器确认，返回的信息有在客户端生成的messagid, 和服务端生成的msguid，更新本地发送数据库，放入msguid,防止数据重复存储
             console.log("返回数据类型为 PublishAckMessage");
             console.log("PublishAckMessage is:", msgObj);
-
+            saveMessage(content, "pullhismsg",function (err, result) {
+                if(null != err){
+                    console.log("PullHisMsg saveMessage() err:",err );
+                }
+            });
             break;
 
         case 6://返回数据类型为QueryAckMessage, 服务器下发的用户离线信息
@@ -49,6 +61,8 @@ const callback = (msgObj) => {
             if(msgObj.status == 0){ //PullMsg 拉取使用者7天内所有的聊天记录，protobuf对应的类型：CSQryPullMessageACK
                 var messages = msgroot.CSQryPullMessageACK.decode(msgObj.data);
                 var count = messages.list.length;
+                console.log("count=",count);
+
                 var i = 0;
                 async.whilst(
                     function (cb) {
@@ -61,6 +75,7 @@ const callback = (msgObj) => {
                         if(message.toUserId == currentuser){
                             msgDirection = 2;
                         }
+                        console.log("msgDirection=",msgDirection);
                         var msgcontent = JSON.parse(message.content.toString("utf8"));
 
                         var content = getMsgContent(parseInt(message.msgTimestamp),message.msgUID,message.channelType,msgcontent["content"],msgcontent["extra"],message.toUserId, message.objectName,message.fromUserId,msgDirection);
@@ -208,13 +223,11 @@ function sendQryMessages(sendBoxSyncTime, isPullSend,fromUserId, syncTime) {
  * @param syncTime 同步时间戳
  * @param count 数量
  */
-function getConversationList(sendBoxSyncTime, syncTime, count) {
+function getConversationList(sendBoxSyncTime, syncTime, count,cb) {
     //向远端服务器发送查询使用人7天以内所有的消息
     sendQryMessages(sendBoxSyncTime, true,"fromuserid", syncTime);
     //查询本地数据库conversation表
-    qryLocalConversationList(syncTime,count,function (err,result) {
-        console.log("getConversationList result:",result);
-    });
+    qryLocalConversationList(syncTime,count,cb);
 
 }
 
@@ -275,10 +288,7 @@ function saveMessage(content,caller,cb){
                 }
             )
         });
-    } else if(content["msgDirection"] == 1&&caller =="recceimsg") { //发送消息 1 && 来自于收取的消息
-
-
-    } else if(content["msgDirection"] == 1&&caller =="pullhismsg") { //发送消息 1 && 来自于拉取的历史消息
+    }else if(content["msgDirection"] == 1&&caller =="pullhismsg") { //发送消息 1 && 来自于拉取的历史消息
         //先看消息是否已经在数据库里面
         var checkSql = "select * from message where msguid=? and messageDirection=? and sendStatus=?";
         var checkSqlValue = [content["msgUID"],2,"sent"];
@@ -317,6 +327,8 @@ function saveMessage(content,caller,cb){
 
                     });
                 });
+            }else{//说明有记录，跳过
+                cb(null,null);
             }
         });
 
@@ -324,6 +336,7 @@ function saveMessage(content,caller,cb){
         //先看消息是否已经在数据库里面
         var checkSql = "select * from message where msguid=? and messageDirection=?";
         var checkSqlValue = [content["msgUID"],2];
+
         db.all(checkSql,checkSqlValue, function (err, rows) {
             if (null != err) {
                 console.log("select err", err);
@@ -359,10 +372,12 @@ function saveMessage(content,caller,cb){
 
                     });
                 })
+            }else { //跳过
+                cb(null,null);
             }
         });
     }else {
-
+        cb(null,null);
     }
 
 
@@ -413,8 +428,6 @@ function insert_or_update_conversation(content,cb){
         selectsql = "select * from conversation where (targetID=? and senderID=?) and conversationType='GROUP'";
         values = [targetID,targetID];
     }
-    console.log("slectsql=",selectsql);
-    console.log("values=",values);
     db.all(selectsql, values, function (err, rows) {
         if(null!=err) {
             cb(err,null);
@@ -519,6 +532,9 @@ function main(){
     //设置连接回调
     setConnectCallback(function (result) {
         currentuser = result;
+        console.log("current user is:", currentuser);
+
+
         //查询和某人的历史消息
         //获取当前时间戳
         // ts = new Date().valueOf();
@@ -527,7 +543,12 @@ function main(){
         // });
 
         //查询会话列表getConversationList(sendBoxSyncTime, syncTime, count)
-        getConversationList(1, 0, 20);
+        getConversationList(1, 0, 20,function (err,result) {
+            console.log("getConversationList result:",result);
+
+        });
+
+
         //发送断开连接消息
         // console.log("sendDisConMsg：", sendDisConMsg());
 
