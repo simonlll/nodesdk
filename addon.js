@@ -31,13 +31,12 @@ const callback = (msgObj) => {
 
 
         case 3: //返回数据类型为ServerPublishMessage, 服务器下发的聊天信息
+
             console.log("返回数据类型为ServerPublishMessage");
 
             var message = msgroot.Message.decode(msgObj.data);
-
             var msgDirection = 2; // 消息方向：//SEND 1 RECEIVE 2
             var msgcontent = JSON.parse(message.content.toString("utf8"));
-
             var content = getMsgContent(parseInt(message.msgTimestamp),message.msgUID,message.channelType,msgcontent["content"],msgcontent["extra"],message.toUserId, message.objectName,message.fromUserId,msgDirection);
             saveMessage(content, "recceivemsg",function (err, result) {
                 if(null != err){
@@ -49,9 +48,14 @@ const callback = (msgObj) => {
         case 4://消息到达服务器确认，返回的信息有在客户端生成的messagid, 和服务端生成的msguid，更新本地发送数据库，放入msguid,防止数据重复存储
             console.log("返回数据类型为 PublishAckMessage");
             console.log("PublishAckMessage is:", msgObj);
-            saveMessage(content, "pullhismsg",function (err, result) {
-                if(null != err){
-                    console.log("PullHisMsg saveMessage() err:",err );
+            //使用发送消息在数据库中的id,以便更新数据库中消息的发送状态从 'sending' 到 'sent', 并将msguid字段更新成服务器返回的msguid
+            var updateSql = "update message set sendStatus = ? , msguid = ? where id= ?";
+            var values = ["sent",  msgObj["msgId"], msgObj["messageId"]];
+            console.log("updateSql",updateSql);
+            console.log("values",values);
+            db.all(updateSql, values, function (err, result) {
+                if (null != err) {
+                    console.log("update error:", err);
                 }
             });
             break;
@@ -487,7 +491,8 @@ function sendMsg(channeltype, content, extra,targetId, msgType,senderId,msgDirec
             content["content"] = bytecontent;
             contentbuffer = msgroot.Message.encode(content).finish();
             //发送消息 参数1：conversation_type 1 private 3 group 参数4： msgid
-            console.log(sendByteMsg(1, "zoujia1", contentbuffer, contentbuffer.length, 1));
+            //TODO 参数4 msgid要变成数据库主键，将来返回发送确认信息时，要带着该主键，标识该消息已送达服务器
+            console.log(sendByteMsg(1, "zoujia1", contentbuffer, contentbuffer.length, content["messageid"]));
         });
 
     });
@@ -543,17 +548,17 @@ function main(){
         // });
 
         //查询会话列表getConversationList(sendBoxSyncTime, syncTime, count)
-        getConversationList(1, 0, 20,function (err,result) {
-            console.log("getConversationList result:",result);
-
-        });
+        // getConversationList(1, 0, 20,function (err,result) {
+        //     console.log("getConversationList result:",result);
+        //
+        // });
 
 
         //发送断开连接消息
         // console.log("sendDisConMsg：", sendDisConMsg());
 
         //发送消息
-        // sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2
+        sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2
 
     })
 
@@ -569,9 +574,6 @@ function main(){
     //发送断开连接消息
     // console.log("sendDisConMsg：", sendDisConMsg());
 
-    //发送查询字符串
-    // sendQryHisMsg();
-    // qry7dayMsg();
 
 
 };
