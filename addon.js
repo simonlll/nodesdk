@@ -9,6 +9,7 @@ var async = require('async');
 
 var currentuser;
 var connectioncallback;
+var messageListener;
 db = new sqlite3.Database(file);
 // db.run("CREATE TABLE conversation(id INTEGER primary key autoincrement,senderID varchar(50),targetID varchar(50),conversationType varchar(10),msgType varchar(20),data varchar(500), sentTime INTEGER, receivedTime INTEGER,portraitUrl varchar(50), latestMessageId INTEGER,unreadMessageCount INTEGER,conversationTitle varchar(50));",function (err) {
     
@@ -38,6 +39,7 @@ const callback = (msgObj) => {
             var msgDirection = 2; // 消息方向：//SEND 1 RECEIVE 2
             var msgcontent = JSON.parse(message.content.toString("utf8"));
             var content = getMsgContent(parseInt(message.msgTimestamp),message.msgUID,message.channelType,msgcontent["content"],msgcontent["extra"],message.toUserId, message.objectName,message.fromUserId,msgDirection);
+            messageListener(content);
             saveMessage(content, "recceivemsg",function (err, result) {
                 if(null != err){
                     console.log("recceivemsg saveMessage() err:",err );
@@ -525,6 +527,14 @@ function setConnectCallback(cb){
 
 }
 
+/**
+ * 设置消息监听器
+ * @param cb
+ */
+function setMessageListener(cb){
+    messageListener = cb;
+}
+
 
 
 
@@ -534,6 +544,11 @@ function main(){
     InitClient();
     //启动接受线程，设置消息回调函数
     createTSFN(callback);
+
+    setMessageListener(function (msg) {
+        console.log("消息监听器:", msg);
+    });
+
     //设置连接回调
     setConnectCallback(function (result) {
         currentuser = result;
