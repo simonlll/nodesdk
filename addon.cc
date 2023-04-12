@@ -15,6 +15,15 @@ bool g_bRun = true;
 Napi::ThreadSafeFunction tsfn;
 Napi::ThreadSafeFunction conStatusListener;
 std::thread nativeThread;
+//自动重连时间间隔数组
+float reconnectInterval[10] = {0,0.25,0.5,1,2,4,8,16,32,64};
+//重连尝试次数
+int retryCount=0;
+//用户传入的token
+char* token;
+
+// 定义重连
+void retry();
 
 // 从EasyTcpClient返回 ServerPublishMessage 的回调函数
 void serverPublishMsgResultCallback(ServerPublishMessage msg, int dataSize) {
@@ -29,7 +38,11 @@ void connAckMessageResultCallback(ConnAckMessage msg) {
 // 从EasyTcpClient返回网络连接断开的回调函数
 void disconnectCallback(int errorCode) {
   printf("网络连接已断开,错误码是=%d.\n", errorCode);
+    //自动重连
+   retry();
 }
+
+
 
 void setMethodPoint() {
   // 定义函数指针(ServerPublishMessage)
@@ -49,6 +62,43 @@ void setMethodPoint() {
       disconnectCallback;
   // 设置回调
   client->setDisconnectCallback(pdisconnectCallback);
+}
+
+//自动重连
+void retry(){
+    //最大重连次数
+    int maxRetryCount = sizeof(reconnectInterval)/sizeof(float);
+    //重连时间间隔
+    int interval;
+    if(retryCount>=0 && retryCount<=maxRetryCount){
+            interval = reconnectInterval[retryCount];
+    }else{
+            interval = reconnectInterval[maxRetryCount];
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(1000*interval));
+    int a = client->Connect("10.0.0.52", 7001);
+
+    char* clientIP = "clientip";
+
+    char* userid = "userid";
+
+    int buflen;
+
+    // 创建一个连接消息
+    char* buf = make_connect_message(&buflen, token, clientIP, userid);
+
+    int ret = 10;
+    // 发送连接消息
+    if (buf) {
+        printf("自动重连，等待了%d秒，发送重连消息\n", 1000*interval);
+
+        ret = client->SendMessage(buf, buflen);
+        printf("发送连接消息结果%d\n", ret);
+        free(buf);
+        buf = NULL;
+    }
+
+    retryCount++;
 }
 
 // 定义监听消息线程
@@ -198,8 +248,10 @@ Napi::Value Connect(const Napi::CallbackInfo& info) {
 
   int buflen;
 
+  token = s1.data();
+
   // 创建一个连接消息
-  char* buf = make_connect_message(&buflen, s1.data(), clientIP, userid);
+  char* buf = make_connect_message(&buflen, token, clientIP, userid);
 
   int ret = 10;
   // 发送连接消息
