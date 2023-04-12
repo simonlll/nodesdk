@@ -36,6 +36,7 @@ class EasyTcpClient
     bool _isConnect;
     EasyTcpClientImpl * impl;
     Napi::ThreadSafeFunction _listener;
+    Napi::ThreadSafeFunction _conStatusListener;
     void (*_serverPublishMsgResultCallback)(ServerPublishMessage, int);
     void (*_connAckMsgResultCallback)(ConnAckMessage);
 
@@ -67,6 +68,10 @@ public:
 
     void setListener(Napi::ThreadSafeFunction listener){
       _listener = listener;
+    }
+
+    void setConStatusListener(Napi::ThreadSafeFunction conStatusListener){
+      _conStatusListener = conStatusListener;
     }
 
 
@@ -171,6 +176,14 @@ public:
             if (ret < 0)
             {
                 printf("<socket=%d>select任务结束1\n", _sock);
+                //调用通知前端连接断开回调函数
+                auto callback = [=](Napi::Env env, Napi::Function jsCallback, int* errorCode ) {
+                    Napi::Object obj = Napi::Object::New(env);
+                    obj.Set(Napi::String::New(env, "errorcode"), Napi::Number::New(env,*errorCode));
+                    jsCallback.Call({obj});
+                };
+                int code = 633;
+                napi_status status = _conStatusListener.BlockingCall(&code, callback);
                 Close();
                 return false;
             }
@@ -180,6 +193,14 @@ public:
                 if (-1 == RecvData(_sock))
                 {
                     printf("<socket=%d>select任务结束2\n", _sock);
+                    //调用通知前端连接断开回调函数
+                    auto callback = [=](Napi::Env env, Napi::Function jsCallback, int* errorCode ) {
+                        Napi::Object obj = Napi::Object::New(env);
+                        obj.Set(Napi::String::New(env, "errorcode"), Napi::Number::New(env,*errorCode));
+                        jsCallback.Call({obj});
+                    };
+                    int code = 642;
+                    napi_status status = _conStatusListener.BlockingCall(&code, callback);
                     Close();
                     return false;
                 }
@@ -493,6 +514,14 @@ public:
             ret = send(_sock, (const char*)message, nLen, 0);
             if (SOCKET_ERROR == ret)
             {
+                //调用通知前端连接断开回调函数
+                auto callback = [=](Napi::Env env, Napi::Function jsCallback, int* errorCode ) {
+                    Napi::Object obj = Napi::Object::New(env);
+                    obj.Set(Napi::String::New(env, "errorcode"), Napi::Number::New(env,*errorCode));
+                    jsCallback.Call({obj});
+                };
+                int code = 912;
+                napi_status status = _conStatusListener.BlockingCall(&code, callback);
                 Close();
             }
         }

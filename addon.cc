@@ -13,6 +13,7 @@ EasyTcpClient* client;
 bool g_bRun = true;
 
 Napi::ThreadSafeFunction tsfn;
+Napi::ThreadSafeFunction conStatusListener;
 std::thread nativeThread;
 
 // 从EasyTcpClient返回 ServerPublishMessage 的回调函数
@@ -213,10 +214,32 @@ Napi::Number InitClient(const Napi::CallbackInfo& info) {
   return Napi::Number::New(env, a);
 }
 
+// 设置连接状态回调函数
+Napi::Value setConStatusListener(const Napi::CallbackInfo& info) {
+  Napi::Env env = info.Env();
+
+  // Create a new ThreadSafeFunction.
+  conStatusListener = Napi::ThreadSafeFunction::New(
+      env,
+      info[0]
+          .As<Napi::Function>(),  // JavaScript function called asynchronously
+      "Connection status listener",            // Name
+      0,                          // Unlimited queue
+      1,                          // Only one thread will use this initially
+      [](Napi::Env) {             // Finalizer used to clean threads up
+       });
+
+  client->setConStatusListener(conStatusListener);
+
+  // Return the deferred's Promise. This Promise is resolved in the thread-safe
+  // function's finalizer callback.
+  int a = 100;
+  return Napi::Number::New(env, a);
+}
+
 // 启动接受线程，设置消息回调函数
 Napi::Value CreateTSFN(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
-  // Construct context data
 
   // Create a new ThreadSafeFunction.
   tsfn = Napi::ThreadSafeFunction::New(
@@ -239,6 +262,8 @@ Napi::Value CreateTSFN(const Napi::CallbackInfo& info) {
   return Napi::Number::New(env, a);
 }
 
+
+
 // 监听消息线程
 void threadEntry() {
   while (g_bRun) {
@@ -256,6 +281,8 @@ Napi::Object Init(Napi::Env env, Napi::Object exports) {
   exports["InitClient"] = Napi::Function::New(env, InitClient);
   // 启动接受线程，设置消息回调函数
   exports["createTSFN"] = Napi::Function::New(env, CreateTSFN);
+  // 设置网络断开错误码回调
+  exports["setConStatusListener"] = Napi::Function::New(env, setConStatusListener);
   // 发送连接消息（参数是用户的token)
   exports["Connect"] = Napi::Function::New(env, Connect);
   // 发送消息

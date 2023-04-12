@@ -1,4 +1,4 @@
-const { createTSFN, InitClient,Connect,sendByteMsg,sendQueryBytesMsg,sendPingMsg,sendDisConMsg} = require('bindings')('addon');
+const { createTSFN, InitClient,Connect,sendByteMsg,sendQueryBytesMsg,sendPingMsg,sendDisConMsg,setConStatusListener} = require('bindings')('addon');
 var protobuf = require("protobufjs");
 const utf8 = require('utf8');
 var fs = require('fs');
@@ -7,9 +7,14 @@ var file = "sundot.db";
 var msgroot = require("./message.js");
 var async = require('async');
 
+//当前用户
 var currentuser;
+//连接回调
 var connectioncallback;
+//消息监听器
 var messageListener;
+
+
 db = new sqlite3.Database(file);
 // db.run("CREATE TABLE conversation(id INTEGER primary key autoincrement,senderID varchar(50),targetID varchar(50),conversationType varchar(10),msgType varchar(20),data varchar(500), sentTime INTEGER, receivedTime INTEGER,portraitUrl varchar(50), latestMessageId INTEGER,unreadMessageCount INTEGER,conversationTitle varchar(50));",function (err) {
     
@@ -545,8 +550,14 @@ function main(){
     //启动接受线程，设置消息回调函数
     createTSFN(callback);
 
+    //设置消息监听器
     setMessageListener(function (msg) {
         console.log("消息监听器:", msg);
+    });
+
+    setConStatusListener(function(conStatus){
+
+        console.log("网络连接断开错误代码:", conStatus.errorcode);
     });
 
     //设置连接回调
@@ -574,6 +585,7 @@ function main(){
 
         //发送消息
         sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2
+
 
     })
 
