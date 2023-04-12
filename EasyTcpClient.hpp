@@ -39,6 +39,7 @@ class EasyTcpClient
     Napi::ThreadSafeFunction _conStatusListener;
     void (*_serverPublishMsgResultCallback)(ServerPublishMessage, int);
     void (*_connAckMsgResultCallback)(ConnAckMessage);
+    void (*_disconnectCallback)(int);
 
 public:
     
@@ -49,17 +50,20 @@ public:
         _isConnect = false;
     }
 
+    //设置函数指针（实现回调服务器下发消息给addon.cc，已废弃)
     void setServerPublishMsgResultCallback(void(*serverPublishMsgResultCallback)(ServerPublishMessage, int)){
         _serverPublishMsgResultCallback = serverPublishMsgResultCallback;
-
-
     }
 
-
-    void setConnAckMsgResultCallback(void(*ConnAckMsgResultCallback)(ConnAckMessage)){
-        _connAckMsgResultCallback = ConnAckMsgResultCallback;
+    //设置函数指针（实现连接回调消息给addon.cc，已废弃)
+    void setConnAckMsgResultCallback(void(*connAckMsgResultCallback)(ConnAckMessage)){
+        _connAckMsgResultCallback = connAckMsgResultCallback;
     }
-    
+
+    //设置函数指针（实现连接断开回调消息给addon.cc，在使用)
+    void setDisconnectCallback(void (*disconnectCallback)(int)){
+        _disconnectCallback = disconnectCallback;
+    }
 
     virtual ~EasyTcpClient()
     {
@@ -183,6 +187,9 @@ public:
                     jsCallback.Call({obj});
                 };
                 int code = 633;
+                //回调addon.cc
+                _disconnectCallback(code);
+                //回调给js
                 napi_status status = _conStatusListener.BlockingCall(&code, callback);
                 Close();
                 return false;
@@ -200,6 +207,9 @@ public:
                         jsCallback.Call({obj});
                     };
                     int code = 642;
+                    //回调addon.cc
+                    _disconnectCallback(code);
+                    //回调给js
                     napi_status status = _conStatusListener.BlockingCall(&code, callback);
                     Close();
                     return false;
@@ -521,6 +531,9 @@ public:
                     jsCallback.Call({obj});
                 };
                 int code = 912;
+                //回调addon.cc
+                _disconnectCallback(code);
+                //回调给js
                 napi_status status = _conStatusListener.BlockingCall(&code, callback);
                 Close();
             }

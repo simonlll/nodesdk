@@ -26,6 +26,11 @@ void connAckMessageResultCallback(ConnAckMessage msg) {
   printf("ConnAckMessage, userid=%s.\n", msg.userId);
 }
 
+// 从EasyTcpClient返回网络连接断开的回调函数
+void disconnectCallback(int errorCode) {
+  printf("网络连接已断开,错误码是=%d.\n", errorCode);
+}
+
 void setMethodPoint() {
   // 定义函数指针(ServerPublishMessage)
   void (*pServerPublishMsgResultCallback)(ServerPublishMessage, int) =
@@ -38,6 +43,12 @@ void setMethodPoint() {
       connAckMessageResultCallback;
   // 设置回调
   client->setConnAckMsgResultCallback(pconnAckMessageResultCallback);
+
+  // 定义函数指针(返回连接断开错误吗)
+  void (*pdisconnectCallback)(int) =
+      disconnectCallback;
+  // 设置回调
+  client->setDisconnectCallback(pdisconnectCallback);
 }
 
 // 定义监听消息线程
