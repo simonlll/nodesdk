@@ -1,5 +1,4 @@
 const { createTSFN, InitClient,Connect,sendByteMsg,sendQueryBytesMsg,sendPingMsg,sendDisConMsg,setConStatusListener} = require('bindings')('addon');
-var protobuf = require("protobufjs");
 const utf8 = require('utf8');
 var fs = require('fs');
 var sqlite3 = require('sqlite3').verbose();
@@ -584,7 +583,7 @@ function main(){
         // console.log("sendDisConMsg：", sendDisConMsg());
 
         //发送消息
-        sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2
+        // sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2
 
 
     })

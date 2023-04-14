@@ -10,11 +10,16 @@ using namespace std;
 constexpr size_t ARRAY_LENGTH = 10;
 
 EasyTcpClient* client;
-bool g_bRun = true;
 
 Napi::ThreadSafeFunction tsfn;
 Napi::ThreadSafeFunction conStatusListener;
 std::thread nativeThread;
+//im server地址
+//char* host = "10.0.0.52"; //本机
+char* host = "10.0.0.138"; //macbook air
+//im server 端口
+//int port = 7001; //本机
+int port = 7000; //mackbook air
 //自动重连时间间隔数组
 float reconnectInterval[10] = {0,0.25,0.5,1,2,4,8,16,32,64};
 //重连尝试次数
@@ -24,6 +29,9 @@ char* token;
 
 // 定义重连
 void retry();
+
+//定义连接
+int innerconnect();
 
 // 从EasyTcpClient返回 ServerPublishMessage 的回调函数
 void serverPublishMsgResultCallback(ServerPublishMessage msg, int dataSize) {
@@ -64,6 +72,32 @@ void setMethodPoint() {
   client->setDisconnectCallback(pdisconnectCallback);
 }
 
+// 自动重连时的连接
+int innerconnect(){
+
+
+    char* clientIP = "clientip";
+
+    char* userid = "userid";
+
+    int buflen;
+
+    // 创建一个连接消息
+    char* buf = make_connect_message(&buflen, token, clientIP, userid);
+
+    int ret = 174;
+    // 发送连接消息
+    if (buf) {
+        ret = client->SendMessage(buf, buflen);
+        printf("发送连接消息结果%d\n", ret);
+        free(buf);
+        if(ret != 174){//说明发送连接字符串失败，要重连
+            retry();
+        }
+        buf = NULL;
+    }
+    return ret;
+}
 //自动重连
 void retry(){
     //最大重连次数
@@ -75,30 +109,20 @@ void retry(){
     }else{
             interval = reconnectInterval[maxRetryCount];
     }
+
+
     std::this_thread::sleep_for(std::chrono::milliseconds(1000*interval));
-    int a = client->Connect("10.0.0.52", 7001);
 
-    char* clientIP = "clientip";
-
-    char* userid = "userid";
-
-    int buflen;
-
-    // 创建一个连接消息
-    char* buf = make_connect_message(&buflen, token, clientIP, userid);
-
-    int ret = 10;
-    // 发送连接消息
-    if (buf) {
-        printf("自动重连，等待了%d秒，发送重连消息\n", 1000*interval);
-
-        ret = client->SendMessage(buf, buflen);
-        printf("发送连接消息结果%d\n", ret);
-        free(buf);
-        buf = NULL;
-    }
-
+    printf("自动重连，等待了%d秒，重新尝试连接\n", 1000*interval);
     retryCount++;
+    int a = client->Connect(host, port);
+
+    if(a == -1){//-1说明连接im服务器不成功，自动重连
+        retry();
+    }
+    innerconnect();
+
+
 }
 
 // 定义监听消息线程
@@ -240,29 +264,10 @@ Napi::Value Connect(const Napi::CallbackInfo& info) {
   }
 
   std::string s1 = info[0].As<Napi::String>().Utf8Value();
-
-
-  char* clientIP = "clientip";
-
-  char* userid = "userid";
-
-  int buflen;
-
   token = s1.data();
 
-  // 创建一个连接消息
-  char* buf = make_connect_message(&buflen, token, clientIP, userid);
 
-  int ret = 10;
-  // 发送连接消息
-  if (buf) {
-    printf("发送连接消息buflen%d\n", buflen);
-
-    ret = client->SendMessage(buf, buflen);
-    printf("发送连接消息结果%d\n", ret);
-    free(buf);
-    buf = NULL;
-  }
+  int ret = innerconnect();
   return Napi::Number::New(env, ret);
 }
 
@@ -271,9 +276,12 @@ Napi::Number InitClient(const Napi::CallbackInfo& info) {
 
   Napi::Env env = info.Env();
   client = new EasyTcpClient();
-  // 测试指针函数
+  // 设置指针函数
   setMethodPoint();
-  int a = client->Connect("10.0.0.52", 7001);
+
+  int a = 10;
+  a = client->Connect(host, port);
+
   return Napi::Number::New(env, a);
 }
 
@@ -329,13 +337,14 @@ Napi::Value CreateTSFN(const Napi::CallbackInfo& info) {
 
 // 监听消息线程
 void threadEntry() {
-  while (g_bRun) {
+  while (client->isRun()) {
     std::this_thread::sleep_for(std::chrono::milliseconds(200));
     client->OnRun();
   }
   // Release the thread-safe function. This decrements the internal thread
   // count, and will perform finalization since the count will reach 0.
   tsfn.Release();
+  conStatusListener.Release();
 }
 
 // Addon entry point
