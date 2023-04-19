@@ -2,7 +2,7 @@
   "name": "tsfn-counting",
   "version": "0.0.0",
   "description": "Thread-safe Function Example",
-  "main": "addon.js",
+  "main": "test.js",
   "private": true,
   "gypfile": true,
   "dependencies": {

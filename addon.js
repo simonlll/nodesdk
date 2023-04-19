@@ -5,6 +5,8 @@ var sqlite3 = require('sqlite3').verbose();
 var file = "sundot.db";
 var msgroot = require("./message.js");
 var async = require('async');
+//是否需要初始化数据库表，当数据库初次创建时为真
+var initDB = false;
 
 //当前用户
 var currentuser;
@@ -13,19 +15,61 @@ var connectioncallback;
 //消息监听器
 var messageListener;
 
-
-db = new sqlite3.Database(file);
-// db.run("CREATE TABLE conversation(id INTEGER primary key autoincrement,senderID varchar(50),targetID varchar(50),conversationType varchar(10),msgType varchar(20),data varchar(500), sentTime INTEGER, receivedTime INTEGER,portraitUrl varchar(50), latestMessageId INTEGER,unreadMessageCount INTEGER,conversationTitle varchar(50));",function (err) {
-    
-// });
-// db.run("CREATE TABLE message(id INTEGER primary key autoincrement,senderID varchar(50),targetID varchar(50),conversationType varchar(10),msgType varchar(20),data varchar(500),sendStatus varchar(10),  sendingTime INTEGER, receiveTime INTEGER,  createTime INTEGER, messageDirection INTEGER, msguid varchar(30));",function (err) {
-    
-// });
 if(!fs.existsSync(file)){
     // console.log("Creating db file!");
     fs.openSync(file, 'w');
+    initDB = true;
 }
-//-----------------------------消息回调函数-----------------------------
+
+db = new sqlite3.Database(file);
+
+//当数据库初次创建时，运行创建表：conversation, message
+if(initDB){
+    console.log("第一次运行，创建数据库相关表")
+    //会话表
+    db.run("CREATE TABLE conversation(id INTEGER primary key autoincrement,senderID varchar(50),targetID varchar(50),conversationType varchar(10),msgType varchar(20),data varchar(500), sentTime INTEGER, receivedTime INTEGER,portraitUrl varchar(50), latestMessageId INTEGER,unreadMessageCount INTEGER,conversationTitle varchar(50)),isTop INTEGER;",
+        function (err,ret) {
+            if(err!=null){
+                console.log("创建 conversation 表失败",err);
+            } else {
+                console.log("创建 conversation 表成功");
+            }
+    });
+    //消息表
+    db.run("CREATE TABLE message(id INTEGER primary key autoincrement,senderID varchar(50),targetID varchar(50),conversationType varchar(10),msgType varchar(20),data varchar(500),sendStatus varchar(10),  sendingTime INTEGER, receiveTime INTEGER,  createTime INTEGER, messageDirection INTEGER, msguid varchar(30));",
+        function (err,ret) {
+            if(err!=null){
+                console.log("创建 message 表失败",err);
+            } else {
+                console.log("创建 message 表成功");
+            }
+    });
+
+    //群信息表
+    db.run("CREATE TABLE group_info(id INTEGER primary key autoincrement,group_id varchar(200),name varchar(200));",
+        function (err,ret) {
+            if(err!=null){
+                console.log("创建 group_info 表失败",err);
+            } else {
+                console.log("创建 group_info 表成功");
+            }
+    });
+
+
+    //群成员表
+    db.run("CREATE TABLE group_persons(id INTEGER primary key autoincrement,group_id varchar(200),user_id varchar(50));",
+        function (err,ret) {
+            if(err!=null){
+                console.log("创建 group_persons 表失败",err);
+            } else {
+                console.log("创建 group_persons 表成功");
+            }
+    });
+}
+
+/**
+ * 定义消息回调函数
+ */
 const callback = (msgObj) => {
 
     switch(msgObj.msyType){
@@ -443,19 +487,30 @@ function insert_or_update_conversation(content,cb){
             cb(err,null);
         }
         console.log("rows=",rows);
-        if(rows.length == 0) {//如果查询结果为空
-            var insertOrUpdateSql = "INSERT INTO conversation( \"senderID\", \"targetID\", \"conversationType\", \"msgType\", \"data\", \"sentTime\", \"receivedTime\", \"portraitUrl\", \"latestMessageId\", \"unreadMessageCount\", \"conversationTitle\") VALUES (?,?,?,?,?,?,?,?,?,?,?)";
-            var insertOrUpdatevalues = [senderID, targetID, content["channelType"], content["objectName"], JSON.stringify(content["content"]), content["msgTimestamp"], content["msgTimestamp"], "portraitUrl", content["messageid"], 0, "conversationTitle"];
-            if(channelType == "GROUP") {
-                insertOrUpdatevalues = [targetID, targetID, content["channelType"], content["objectName"], JSON.stringify(content["content"]), content["msgTimestamp"], content["msgTimestamp"], "portraitUrl", content["messageid"], 0, "conversationTitle"];
+        if(rows.length == 0) {//如果查询结果为空,插入新会话
+            var unreadMessageCount = 0;
+            if(content["msgDirection"] == 2){ //接收消息
+                unreadMessageCount = 1; //未读消息设为1
             }
-        } else {
-            insertOrUpdateSql = "update conversation set sentTime=? , receivedTime=?, msgType=?, data=?, latestMessageId=? where (senderID=? and targetID=?) or (senderID=? and targetID=?) and conversationType =?";
-            insertOrUpdatevalues = [content["msgTimestamp"],content["msgTimestamp"],content["objectName"],JSON.stringify(content["content"]),content["messageid"],senderID,targetID,targetID,senderID,"PERSON"];
+            var insertOrUpdateSql = "INSERT INTO conversation( \"senderID\", \"targetID\", \"conversationType\", \"msgType\", \"data\", \"sentTime\", \"receivedTime\", \"portraitUrl\", \"latestMessageId\", \"unreadMessageCount\", \"conversationTitle\", \"isTop\") VALUES (?,?,?,?,?,?,?,?,?,?,?,?)";
+            var insertOrUpdatevalues = [senderID, targetID, content["channelType"], content["objectName"], JSON.stringify(content["content"]), content["msgTimestamp"], content["msgTimestamp"], "portraitUrl", content["messageid"], unreadMessageCount, "conversationTitle",0];
+            if(channelType == "GROUP") {
+                insertOrUpdatevalues = [targetID, targetID, content["channelType"], content["objectName"], JSON.stringify(content["content"]), content["msgTimestamp"], content["msgTimestamp"], "portraitUrl", content["messageid"], unreadMessageCount, "conversationTitle",0];
+            }
+        } else {//更新已有会话
+
+            //获取数据库现有的未读消息
+            var unreadMessageCount = content["messageid"] = rows[0]["unreadMessageCount"];
+            if(content["msgDirection"] == 2){ //如果是接收消息
+                unreadMessageCount++; //将未读消息+1
+            }
+            insertOrUpdateSql = "update conversation set sentTime=? , receivedTime=?, msgType=?, data=?, latestMessageId=?, unreadMessageCount=？where (senderID=? and targetID=?) or (senderID=? and targetID=?) and conversationType =?";
+            insertOrUpdatevalues = [content["msgTimestamp"],content["msgTimestamp"],content["objectName"],JSON.stringify(content["content"]),content["messageid"],unreadMessageCount, senderID,targetID,targetID,senderID,"PERSON"];
+
 
             if(channelType == "GROUP"){
-                insertOrUpdateSql = "update conversation set sentTime=? , receivedTime=?, msgType=?, data=?, latestMessageId=? where (senderID=? and targetID=?) and conversationType =?";
-                insertOrUpdatevalues = [content["msgTimestamp"],content["msgTimestamp"],content["objectName"],JSON.stringify(content["content"]),content["messageid"],targetID,targetID,"GROUP"];
+                insertOrUpdateSql = "update conversation set sentTime=? , receivedTime=?, msgType=?, data=?, latestMessageId=?, unreadMessageCount=？  where (senderID=? and targetID=?) and conversationType =?";
+                insertOrUpdatevalues = [content["msgTimestamp"],content["msgTimestamp"],content["objectName"],JSON.stringify(content["content"]),content["messageid"],unreadMessageCount,targetID,targetID,"GROUP"];
             }
         }
         console.log("insertOrUpdateSql=",insertOrUpdateSql);
@@ -497,7 +552,6 @@ function sendMsg(channeltype, content, extra,targetId, msgType,senderId,msgDirec
             content["content"] = bytecontent;
             contentbuffer = msgroot.Message.encode(content).finish();
             //发送消息 参数1：conversation_type 1 private 3 group 参数4： msgid
-            //TODO 参数4 msgid要变成数据库主键，将来返回发送确认信息时，要带着该主键，标识该消息已送达服务器
             console.log(sendByteMsg(1, "zoujia1", contentbuffer, contentbuffer.length, content["messageid"]));
         });
 
@@ -523,10 +577,11 @@ function getHistoryMessage(timestamp, count, targetId, conversationType,cb){
 
 
 /**
- * 设置连接成功后的回调函数。只有连接成功，才能进行下面的操作
+ * 设置发送token后，与im服务器成功建立连接，连接成功后的回调函数。回调参数：返回token对应的用户id
  * @param cb
  */
 function setConnectCallback(cb){
+    console.log("发送token，与im服务器成功建立连接后，运行回调函数，返回的是token对应的用户名");
     connectioncallback = cb;
 
 }
@@ -536,77 +591,145 @@ function setConnectCallback(cb){
  * @param cb
  */
 function setMessageListener(cb){
+    console.log("设置消息接听器");
     messageListener = cb;
 }
 
-
-
-
-function main(){
-
-    //初始化EasyTcpClient, 和服务器建立连接
-    InitClient();
-    //启动接受线程，设置消息回调函数
+/**
+ * 启动接收线程
+ */
+function startReceiveThread(){
+    console.log("启动接收线程。。。");
+    //启动接受线程，参数是消息回调函数
     createTSFN(callback);
+}
 
-    //设置消息监听器
-    setMessageListener(function (msg) {
-        console.log("消息监听器:", msg);
+
+/**
+ * 清除某个会话中的未读消息数(未测试）
+ * @param targetId 目标ID
+ * @param conversationType 会话类型 'GROUP' 'PERSON'
+ * @param cb 数据库操作回调函数
+ */
+function clearMessagesUnreadStatus(targetId, channelType,cb){
+    targetID = targetId;
+    senderID = "linbin2"; //TODO 因为没有Wi-Fi，暂时使用"linbin2",只有改成 currentuser
+    var selectsql = "select * from conversation where (senderID=? and targetID=?) or (senderID=? and targetID=?) and conversationType='PERSON'";
+    var values = [senderID,targetID,targetID,senderID];
+    if(channelType == "GROUP"){
+        selectsql = "select * from conversation where (targetID=? and senderID=?) and conversationType='GROUP'";
+        values = [targetID,targetID];
+    }
+    db.all(selectsql, values, function (err, rows) {
+        if(null!=err) {
+            cb(err,null);
+        }
+        if(rows.length > 0) {//如果查询结果不为空,说明有会话记录，将未读消息数量设为0
+            insertOrUpdateSql = "update conversation set unreadMessageCount=? where (senderID=? and targetID=?) or (senderID=? and targetID=?) and conversationType =?";
+            insertOrUpdatevalues = [0,senderID,targetID,targetID,senderID,"PERSON"];
+
+
+            if(channelType == "GROUP"){
+                insertOrUpdateSql = "update conversation set  unreadMessageCount=? where (senderID=? and targetID=?) and conversationType =?";
+                insertOrUpdatevalues = [0,targetID,targetID,"GROUP"];
+            }
+
+
+            db.all(insertOrUpdateSql,insertOrUpdatevalues,function(err,result){
+                if(err!=null){
+                    cb(err,null);
+                }
+                cb(null,null);
+            })
+        }
     });
+}
 
-    setConStatusListener(function(conStatus){
-
-        console.log("网络连接断开错误代码:", conStatus.errorcode);
+/**
+ * 从本地存储中删除会话(此方法会从本地存储中删除该会话，但是不会删除会话中的消息)
+ * @param targetId
+ * @param channelType
+ * @param cb
+ */
+function removeConversation(targetId, channelType,cb){
+    targetID = targetId;
+    senderID = "linbin2"; //TODO 因为没有Wi-Fi，暂时使用"linbin2",只有改成 currentuser
+    var delsql = "delete from conversation where (senderID=? and targetID=?) or (senderID=? and targetID=?) and conversationType='PERSON'";
+    var values = [senderID,targetID,targetID,senderID];
+    if(channelType == "GROUP"){
+        delsql = "delete from conversation where (targetID=? and senderID=?) and conversationType='GROUP'";
+        values = [targetID,targetID];
+    }
+    db.all(delsql, values, function (err, ret) {
+        if(null!=err) {
+            cb(err,null);
+        }
+        cb(null,null);
     });
+}
 
-    //设置连接回调
-    setConnectCallback(function (result) {
-        currentuser = result;
-        console.log("current user is:", currentuser);
-
-
-        //查询和某人的历史消息
-        //获取当前时间戳
-        // ts = new Date().valueOf();
-        // getHistoryMessage(ts, 20, "zoujia1", "PERSON",function (err, result) {
-        //     console.log("getHistoryMessage result:",result);
-        // });
-
-        //查询会话列表getConversationList(sendBoxSyncTime, syncTime, count)
-        // getConversationList(1, 0, 20,function (err,result) {
-        //     console.log("getConversationList result:",result);
-        //
-        // });
-
-
-        //发送断开连接消息
-        // console.log("sendDisConMsg：", sendDisConMsg());
-
-        //发送消息
-        // sendMsg("PERSON","你哈","extra","zoujia1","TxtMsg","linbin2",1); //SEND 1 RECEIVE 2
-
-
-    })
+/**
+ * 设置会话的置顶状态
+ * @param targetId
+ * @param channelType
+ * @param istop
+ * @param cb
+ */
+function setConversationToTop(targetId, channelType,istop,cb){
+    targetID = targetId;
+    senderID = "linbin2"; //TODO 因为没有Wi-Fi，暂时使用"linbin2",只有改成 currentuser
+    var selectsql = "select * from conversation where (senderID=? and targetID=?) or (senderID=? and targetID=?) and conversationType='PERSON'";
+    var values = [senderID,targetID,targetID,senderID];
+    if(channelType == "GROUP"){
+        selectsql = "select * from conversation where (targetID=? and senderID=?) and conversationType='GROUP'";
+        values = [targetID,targetID];
+    }
+    db.all(selectsql, values, function (err, rows) {
+        if(null!=err) {
+            cb(err,null);
+        }
+        if(rows.length > 0) {//如果查询结果不为空,说明有会话记录，设置会话置顶字段
+            insertOrUpdateSql = "update conversation set isTop=? where (senderID=? and targetID=?) or (senderID=? and targetID=?) and conversationType =?";
+            insertOrUpdatevalues = [istop,senderID,targetID,targetID,senderID,"PERSON"];
 
 
-    //发送连接消息（参数是用户的token)
-    console.log("发送连接消息的结果",Connect("AJofTYRyfPCyghUPxmshEjK/lhkVnr7w6ye/Pu9YaXvKepMyIxQxs5hXEb3vSOHpGvEE8dSemsNOI/azIuA9LOdqfsI="));
+            if(channelType == "GROUP"){
+                insertOrUpdateSql = "update conversation set  isTop=? where (senderID=? and targetID=?) and conversationType =?";
+                insertOrUpdatevalues = [0,targetID,targetID,"GROUP"];
+            }
 
 
+            db.all(insertOrUpdateSql,insertOrUpdatevalues,function(err,result){
+                if(err!=null){
+                    cb(err,null);
+                }
+                cb(null,null);
+            })
+        }
+    });
+}
 
-    //发送ping消息
-    // console.log("sendPingMsg返回结果：", sendPingMsg());
+//导出初始化客户端
+module.exports.InitClient = InitClient;
+//启动接收线程
+module.exports.startReceiveThread = startReceiveThread;
+//导出设置消息监听器
+module.exports.setMessageListener = setMessageListener;
+//设置连接状态监听器
+module.exports.setConStatusListener = setConStatusListener;
+//设置发送token后，与im服务器成功建立连接，连接成功后的回调函数。回调参数：返回token对应的用户id
+module.exports.setConnectCallback = setConnectCallback;
+//发送token给im服务器进行验证
+module.exports.Connect = Connect;
+//发送心跳消息
+module.exports.sendPingMsg = sendPingMsg;
+//发送断开连接消息
+module.exports.sendDisConMsg = sendDisConMsg;
+//清除某个会话中的未读消息数(已测试）
+module.exports.clearMessagesUnreadStatus = clearMessagesUnreadStatus;
+//从本地存储中删除会话(此方法会从本地存储中删除该会话，但是不会删除会话中的消息)(已测试）
+module.exports.removeConversation = removeConversation;
+//设置会话的置顶状态（已测试）
+module.exports.setConversationToTop = setConversationToTop;
 
-    //发送断开连接消息
-    // console.log("sendDisConMsg：", sendDisConMsg());
-
-
-
-};
-
-
-
-
-
-main();
 

@@ -102,18 +102,18 @@ int innerconnect(){
 void retry(){
     //最大重连次数
     int maxRetryCount = sizeof(reconnectInterval)/sizeof(float);
+
     //重连时间间隔
-    int interval;
-    if(retryCount>=0 && retryCount<=maxRetryCount){
+    float interval;
+    if(retryCount>=0 && retryCount<maxRetryCount){
             interval = reconnectInterval[retryCount];
     }else{
-            interval = reconnectInterval[maxRetryCount];
+            interval = reconnectInterval[maxRetryCount-1];
     }
 
+    std::this_thread::sleep_for(std::chrono::milliseconds(int(1000*interval)));
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(1000*interval));
-
-    printf("自动重连，等待了%d秒，重新尝试连接\n", 1000*interval);
+    printf("自动重连，等待了%f秒，重新尝试连接\n", 1000*interval);
     retryCount++;
     int a = client->Connect(host, port);
 
@@ -265,8 +265,6 @@ Napi::Value Connect(const Napi::CallbackInfo& info) {
 
   std::string s1 = info[0].As<Napi::String>().Utf8Value();
   token = s1.data();
-
-
   int ret = innerconnect();
   return Napi::Number::New(env, ret);
 }
@@ -281,13 +279,17 @@ Napi::Number InitClient(const Napi::CallbackInfo& info) {
 
   int a = 10;
   a = client->Connect(host, port);
-
+  //如果返回值为-1，说明socket连接失败
+  if(a == -1){
+    retry();
+  }
   return Napi::Number::New(env, a);
 }
 
 // 设置连接状态回调函数
 Napi::Value setConStatusListener(const Napi::CallbackInfo& info) {
   Napi::Env env = info.Env();
+  printf("设置连接状态回调函数");
 
   // Create a new ThreadSafeFunction.
   conStatusListener = Napi::ThreadSafeFunction::New(
@@ -317,7 +319,7 @@ Napi::Value CreateTSFN(const Napi::CallbackInfo& info) {
       env,
       info[0]
           .As<Napi::Function>(),  // JavaScript function called asynchronously
-      "Resource Name",            // Name
+      "msg callback function",            // Name
       0,                          // Unlimited queue
       1,                          // Only one thread will use this initially
       [](Napi::Env) {             // Finalizer used to clean threads up
